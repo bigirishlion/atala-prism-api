@@ -37,6 +37,8 @@ val environment = "ppp.atalaprism.io"
 val grpcOptions = GrpcOptions("https", environment, 50053)
 val nodeAuthApi = NodeAuthApiImpl(grpcOptions)
 
+class HolderSeedFile(val filename: String? = "holderSeed")
+
 // Generates a seed file that can be downloaded and stored for making subsiquent requests.
 fun createSeedFile(filename: String? = "seed") {
     val seed = KeyDerivation.binarySeed(KeyDerivation.randomMnemonicCode(), "passphrase")
@@ -81,8 +83,8 @@ fun buildIssuerLongFormDid(): LongFormPrismDid {
     return issuerUnpublishedDid
 }
 
-fun buildHolderLongFormDid(): LongFormPrismDid {
-    val holderSeed = readSeedFile("holderSeed")
+fun buildHolderLongFormDid(filename: String?): LongFormPrismDid {
+    val holderSeed = readSeedFile(filename ?: "holderSeed")
     val holderMasterKeyPair = KeyGenerator.deriveKeyFromFullPath(holderSeed, 0, MasterKeyUsage, 0)
     val holderUnpublishedDid =
             PrismDid.buildLongFormFromMasterPublicKey(holderMasterKeyPair.publicKey)
@@ -101,8 +103,8 @@ fun getIssuerDid(): UnpublishedDidResult {
     return UnpublishedDidResult("$issuerDidCanonical", "$issuerDidLongForm")
 }
 
-fun getHolderDid(): UnpublishedDidResult {
-    val holderUnpublishedDid = buildHolderLongFormDid()
+fun getHolderDid(filename: String?): UnpublishedDidResult {
+    val holderUnpublishedDid = buildHolderLongFormDid(filename)
 
     val holderDidCanonical = holderUnpublishedDid.asCanonical().did
     val holderDidLongForm = holderUnpublishedDid.did
@@ -246,7 +248,11 @@ fun issueCredentials(credentials: IssueCredentials): IssueCredentialsResult {
 
 class VerifyCredentials(val encodedSignedCredential: String, val proof: String)
 
-class VerifyCredentialsResult(val verified: Boolean, val errors: List<String>)
+class VerifyCredentialsResult(
+        val verified: Boolean,
+        val errors: List<String>,
+        val credentials: JsonBasedCredential
+)
 
 @PrismSdkInternal
 fun verifyCredentials(args: VerifyCredentials): VerifyCredentialsResult {
@@ -260,12 +266,7 @@ fun verifyCredentials(args: VerifyCredentials): VerifyCredentialsResult {
     val hasErrors = result.verificationErrors.isNotEmpty()
     val errors = result.verificationErrors.map { it.errorMessage }
 
-    // if (hasErrors) {
-    //     println("verification errors:")
-    //     result.verificationErrors.forEach { println("  ${it.errorMessage}") }
-    // }
-
-    return VerifyCredentialsResult(!hasErrors, errors)
+    return VerifyCredentialsResult(!hasErrors, errors, credential)
 }
 
 class RevokeCredentials(
@@ -338,7 +339,11 @@ fun pollOperation(operationIdHex: String?): String {
 }
 
 @PrismSdkInternal
-fun transactionId(operationIdHex: String): String {
+fun transactionId(operationIdHex: String?): String {
+    if (operationIdHex == null) {
+        throw Exception("Did not specify an operation id")
+    }
+
     var operationId = AtalaOperationId.fromHex(operationIdHex)
     val node = NodeServiceCoroutine.Client(GrpcClient(grpcOptions))
     val response = runBlocking {
@@ -358,31 +363,22 @@ fun main() {
                     get("/did/{didString}") {
                         var didString = call.parameters["didString"]
                         var result = getDidDocument(didString)
-                        call.respond(mapOf("found" to "$result"))
+                        call.respond(result)
                     }
                     get("/getIssuerDid") {
                         try {
                             val result = getIssuerDid()
-                            call.respond(
-                                    mapOf(
-                                            "canonical" to result.canonical,
-                                            "longForm" to result.longForm
-                                    )
-                            )
+                            call.respond(result)
                         } catch (e: Exception) {
                             call.response.status(HttpStatusCode(400, "Bad Request"))
                             call.respond(mapOf("error" to "Error creating DID"))
                         }
                     }
-                    get("/geHolderDid") {
+                    get("/geHolderDid/{filename}") {
                         try {
-                            val result = getHolderDid()
-                            call.respond(
-                                    mapOf(
-                                            "canonical" to result.canonical,
-                                            "longForm" to result.longForm
-                                    )
-                            )
+                            var filename = call.parameters["filename"]
+                            val result = getHolderDid(filename)
+                            call.respond(result)
                         } catch (e: Exception) {
                             call.response.status(HttpStatusCode(400, "Bad Request"))
                             call.respond(mapOf("error" to "Error creating DID"))
@@ -391,13 +387,7 @@ fun main() {
                     post("/publishIssuerDid") {
                         try {
                             val result = publishIssuerDid()
-                            call.respond(
-                                    mapOf(
-                                            "createDidOperationIdHex" to
-                                                    result.createDidOperationIdHex,
-                                            "operationHash" to result.operationHash
-                                    )
-                            )
+                            call.respond(result)
                         } catch (e: Exception) {
                             call.response.status(HttpStatusCode(400, "Bad Request"))
                             call.respond(mapOf("error" to "Error publishing DID"))
@@ -409,16 +399,7 @@ fun main() {
                         try {
                             val args = call.receive<IssueCredentials>()
                             val result = issueCredentials(args)
-                            call.respond(
-                                    mapOf(
-                                            "issueCredentialsOperationIdHex" to
-                                                    result.issueCredentialsOperationIdHex,
-                                            "operationHash" to result.operationHash,
-                                            "encodedSignedCredential" to
-                                                    result.encodedSignedCredential,
-                                            "proof" to result.proof
-                                    )
-                            )
+                            call.respond(result)
                         } catch (e: Exception) {
                             call.response.status(HttpStatusCode(400, "Bad Request"))
                             call.respond(mapOf("error" to "Error verifying credentials"))
@@ -428,10 +409,9 @@ fun main() {
                         try {
                             val args = call.receive<VerifyCredentials>()
                             val result = verifyCredentials(args)
-                            call.respond(
-                                    mapOf("verified" to result.verified, "errors" to result.errors)
-                            )
+                            call.respond(result)
                         } catch (e: Exception) {
+                            println(e)
                             call.response.status(HttpStatusCode(400, "Bad Request"))
                             call.respond(mapOf("error" to "Error verifying credentials"))
                         }
@@ -440,13 +420,7 @@ fun main() {
                         try {
                             val args = call.receive<RevokeCredentials>()
                             val result = revokeCredentials(args)
-                            call.respond(
-                                    mapOf(
-                                            "revokeCredentialsOperationIdHex" to
-                                                    result.revokeCredentialsOperationIdHex,
-                                            "operationHash" to result.operationHash
-                                    )
-                            )
+                            call.respond(result)
                         } catch (e: Exception) {
                             call.response.status(HttpStatusCode(400, "Bad Request"))
                             call.respond(mapOf("error" to "Error revoking credentials"))
@@ -458,10 +432,21 @@ fun main() {
                         try {
                             val operationId = call.parameters["operationId"]
                             val result = pollOperation(operationId)
-                            call.respond(mapOf("result" to result))
+                            call.respond(mapOf("status" to result))
                         } catch (e: Exception) {
                             call.response.status(HttpStatusCode(400, "Bad Request"))
                             call.respond(mapOf("error" to "Error polling operation"))
+                        }
+                    }
+                    get("/transaction/{operationId}") {
+                        try {
+                            val operationId = call.parameters["operationId"]
+                            val result = transactionId(operationId)
+                            call.respond(mapOf("transactionId" to result))
+                        } catch (e: Exception) {
+                            print("$e")
+                            call.response.status(HttpStatusCode(400, "Bad Request"))
+                            call.respond(mapOf("error" to "Error getting transaction id"))
                         }
                     }
                     post("/createIssuerSeedFile") {
@@ -474,7 +459,8 @@ fun main() {
                     }
                     post("/createHolderSeedFile") {
                         try {
-                            createSeedFile("holderSeed")
+                            val args = call.receive<HolderSeedFile>()
+                            createSeedFile(args.filename)
                             call.respond(mapOf("status" to "created holder seed file"))
                         } catch (e: Exception) {
                             call.respond(mapOf("status" to "error"))
