@@ -1,4 +1,4 @@
-# Atala Prism API
+# Atala Prism REST API
 
 ## Install
 
