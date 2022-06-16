@@ -261,8 +261,6 @@ fun verifyCredentials(args: VerifyCredentials): VerifyCredentialsResult {
 
     val result = runBlocking { nodeAuthApi.verify(credential, proof) }
 
-    println("verification result: $result")
-
     val hasErrors = result.verificationErrors.isNotEmpty()
     val errors = result.verificationErrors.map { it.errorMessage }
 
