@@ -12,6 +12,19 @@
 
     TODO: Add tests
 
+## How to use:
+
+1. Begin buy requesting the [/createIssuerSeedFile](#post-create-issuer-seed-file) endpoint. This will create a random seed file that will be used as the issuer to perform other actions.
+2. Next, we'll need the holder did to create/verify/revoke credentials. Start by creating the seed file for the holder using the [/createHolderSeedFile](#post-create-holder-seed-file) endpoint and passing in `filename`.
+3. Get the did by hitting the [/getHolderDid/:filename](#get-holder-did) endpoint. e.g. did:prism:e25665ac84b619a4a414888183016e510b498e0daecbd7c7a9c100a72dfb9fd5
+4. Use the [/issueCredentials](#post-issue-credentials) endpoint using the Did from the previous step
+5. The request is processing. To check the status, hit the [/operation/:operationId](#get-operation-status) endpoint to determine if the request has confirmed on-chain.
+6. Once the credentials have been issues, we can verify the request by hitting [/verifyCredentials](#post-verify-credentials)
+
+That's it! You have officially created credentials in Prism!
+
+7. Once you've verified the credentials, try using the [/revokeCredentials](#post-revoke-credentials) endpoint to revoke the credentials and try the [/verifyCredentials](#post-verify-credentials) endpoint again to confirm that the credentials have been revoked.
+
 # Did Endpoints
 
 ## Get Did
