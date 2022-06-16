@@ -41,6 +41,12 @@ class HolderSeedFile(val filename: String? = "holderSeed")
 
 // Generates a seed file that can be downloaded and stored for making subsiquent requests.
 fun createSeedFile(filename: String? = "seed") {
+    // check first to see if file exists
+    val exists = File(filename).exists()
+    if (exists) {
+        throw Exception("Seed file already exists. Please delete it before creating a new one.")
+    }
+
     val seed = KeyDerivation.binarySeed(KeyDerivation.randomMnemonicCode(), "passphrase")
     File(filename).writeBytes(seed)
     println("wrote seed to file to $filename")
@@ -372,7 +378,7 @@ fun main() {
                             call.respond(mapOf("error" to "Error creating DID"))
                         }
                     }
-                    get("/geHolderDid/{filename}") {
+                    get("/getHolderDid/{filename}") {
                         try {
                             var filename = call.parameters["filename"]
                             val result = getHolderDid(filename)
@@ -450,18 +456,18 @@ fun main() {
                     post("/createIssuerSeedFile") {
                         try {
                             createSeedFile()
-                            call.respond(mapOf("status" to "created issuer seed file"))
+                            call.respond(mapOf("status" to "CREATED"))
                         } catch (e: Exception) {
-                            call.respond(mapOf("status" to "error"))
+                            call.respond(mapOf("status" to "error", "error" to e.message))
                         }
                     }
                     post("/createHolderSeedFile") {
                         try {
                             val args = call.receive<HolderSeedFile>()
                             createSeedFile(args.filename)
-                            call.respond(mapOf("status" to "created holder seed file"))
+                            call.respond(mapOf("status" to "CREATED"))
                         } catch (e: Exception) {
-                            call.respond(mapOf("status" to "error"))
+                            call.respond(mapOf("status" to "error", "error" to e.message))
                         }
                     }
                 }
